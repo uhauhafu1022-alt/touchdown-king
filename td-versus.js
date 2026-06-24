@@ -209,7 +209,7 @@
       }
       return;
     }
-    if (p.k === 'rend') { M.result[p.n] = { offenseIsHost: roundOffenseIsHost(p.n), yard: p.yd, status: p.s }; return; }
+    if (p.k === 'rend') { M.result[p.n] = { offenseIsHost: roundOffenseIsHost(p.n), yard: p.yd, status: p.s }; if (role === 'host') setTimeout(hostAdvance, 2600); return; }
     if (p.k === 'result') { showResult(p.h, p.g); return; }
     if (p.k === 'rematch') { backToLobby(); return; }
   }
