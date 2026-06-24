@@ -366,8 +366,10 @@
     h += '<div class="tdv-players"><div class="tdv-pl"><div class="nm">' + (me ? me.name : getName()) + '（あなた）</div><div class="rl">' + roleLabel(role) + '</div><div class="rd ' + (ready ? 'tdv-ok' : 'tdv-wait') + '">' + (ready ? '準備OK ✓' : '準備中…') + '</div></div>';
     if (other) h += '<div class="tdv-pl"><div class="nm">' + other.name + '</div><div class="rl">' + roleLabel(other.role) + '</div><div class="rd ' + (other.ready ? 'tdv-ok' : 'tdv-wait') + '">' + (other.ready ? '準備OK ✓' : '準備中…') + '</div></div>';
     h += '</div><div class="tdv-act">';
-    if (other && me && me.ready && other.ready) h += '<button class="tdv-pri" disabled>まもなく開始…</button>';
-    else h += '<button class="' + (ready ? 'tdv-ghost' : 'tdv-red') + '" onclick="TDVersus._toggleReady()">' + (ready ? '準備をやめる' : '準備OK') + '</button>';
+    if (other && me && me.ready && other.ready) {
+      if (role === 'host') h += '<button class="tdv-pri" onclick="TDVersus._startMatch()">▶ 対戦スタート</button>';
+      else h += '<button class="tdv-pri" disabled>ホストの開始を待っています…</button>';
+    } else h += '<button class="' + (ready ? 'tdv-ghost' : 'tdv-red') + '" onclick="TDVersus._toggleReady()">' + (ready ? '準備をやめる' : '準備OK') + '</button>';
     h += '<button class="tdv-ghost" onclick="TDVersus._leave()">← 退出する</button></div>';
     if (errMsg) h += '<p class="tdv-err">' + errMsg + '</p>'; m.innerHTML = h;
   }
@@ -379,6 +381,7 @@
     _joinView: function () { view2 = 'join'; errMsg = ''; render(); },
     _join: function () { var inp = document.getElementById('tdv-codein'); var val = ((inp && inp.value) || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5); if (val.length < 4) { renderError('合言葉を正しく入力してください。'); return; } joinRoom(val, 'guest'); },
     _toggleReady: function () { setReady(!ready); },
+    _startMatch: function () { if (role === 'host' && !M.active) { send({ k: 'start' }); enterRound(1); } },
     _leave: function () { leave(); view2 = 'menu'; render(); },
     _rematch: function () { send({ k: 'rematch' }); backToLobby(); },
   };
