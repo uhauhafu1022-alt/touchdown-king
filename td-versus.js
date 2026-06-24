@@ -32,8 +32,8 @@
     var c = getClient(); if (!c) { renderError('オンライン接続が必要です（少し待ってからもう一度）。'); return; }
     leave(); roomCode = code; role = asRole; ready = false; render();
     channel = c.channel('versus:' + code, { config: { presence: { key: myId } } });
-    channel.on('presence', { event: 'sync' }, render)
-      .on('presence', { event: 'join' }, render)
+    channel.on('presence', { event: 'sync' }, function () { render(); maybeStart(); })
+      .on('presence', { event: 'join' }, function () { render(); maybeStart(); })
       .on('presence', { event: 'leave' }, function () { if (M.active) onPeerLeft(); render(); })
       .on('broadcast', { event: 'msg' }, function (m) { onMsg(m && m.payload); })
       .subscribe(function (status) { if (status === 'SUBSCRIBED') { meTracked(); render(); } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') renderError('接続に失敗しました。もう一度お試しください。'); });
@@ -44,10 +44,11 @@
 
   // ホストが、両者準備OKになったら対戦開始を号令
   function maybeStart() {
-    if (role !== 'host' || M.active) return;
-    var pl = peers(); if (pl.length < 2) return;
-    var allReady = true; for (var i = 0; i < pl.length; i++) if (!pl[i].ready) allReady = false;
-    if (allReady) { send({ k: 'start' }); enterRound(1); }
+    if (role !== 'host' || M.active || !ready) return;
+    var others = peers().filter(function (p) { return p.id !== myId; });
+    if (others.length < 1) return;
+    var otherReady = others.every(function (p) { return p.ready; });
+    if (otherReady) { send({ k: 'start' }); enterRound(1); }
   }
 
   /* ============ 対戦本体（フェーズ2） ============ */
