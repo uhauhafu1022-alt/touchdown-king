@@ -229,6 +229,11 @@
   /* ---- 描画（本体のdrawPlayer/drawDownedを流用） ---- */
   function vsRender() {
     if (typeof ctx === 'undefined') return;
+    // 自己修復：対戦中はロビーを隠し、操作ボタンを必ず用意（enterRound取りこぼし対策）
+    var _ov = document.getElementById('tdv-ov'); if (_ov && _ov.style.display !== 'none') _ov.style.display = 'none';
+    if (M.phase !== 'over' && M.phase !== 'result' && !document.getElementById('tdv-ctrl')) { try { buildControls(); } catch (e) {} }
+    if (!M._cv) { try { bindCanvas(); } catch (e) {} }
+    hideCoinHud(true);
     var w = (typeof W !== 'undefined' ? W : 360), h = (typeof H !== 'undefined' ? H : 600);
     // フィールド
     ctx.fillStyle = '#1d7a34'; ctx.fillRect(0, 0, w, h);
