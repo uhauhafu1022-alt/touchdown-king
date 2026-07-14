@@ -48,10 +48,15 @@
     { id: 'big', name: '大型', rMin: 21, rMax: 23, spd: 0.72, cd: 5200 },
   ];
 
+  var MAXDEF = 12;          // 同時に出せる守備の上限（重くならないように）
+  var SPAWN_MIN = 220;      // 連打の最小間隔(ms)
+  var SEND_MS = 60;         // 状態送信の間隔(ms)
+  var _vid = 0;
   var V = {
     active: false, round: 0, amOffense: false, phase: 'idle',
     rbCos: null, result: { 1: null, 2: null }, finalYard: 0,
-    selType: 0, cdUntil: [0, 0, 0], lastSend: 0, latest: null, t0: 0, cdEnd: 0, _cv: null, _ctrl: null
+    selType: 0, cdUntil: [0, 0, 0], lastSend: 0, latest: null, t0: 0, cdEnd: 0, _cv: null, _ctrl: null,
+    lastSpawn: 0, pl: null, dmap: {}, darr: [], barr: [], sc: 0, sp: 0, fy: 0, fyc: 0, hb: 1
   };
   function roundOffenseIsHost(n) { return n === 1; }
 
@@ -84,6 +89,7 @@
     V.active = true; V.round = n; V.phase = 'play';
     V.amOffense = roundOffenseIsHost(n) ? (role === 'host') : (role === 'guest');
     V.selType = 0; V.cdUntil = [0, 0, 0]; V.latest = null; V.finalYard = 0;
+    V.pl = null; V.dmap = {}; V.darr = []; V.barr = []; V.fyc = 0; V.lastSpawn = 0; V.lastSend = 0;
     V.t0 = performance.now();
     closeLobby();
     try { if (typeof challengeMode !== 'undefined') challengeMode = false; } catch (e) {}
@@ -111,10 +117,10 @@
     var now = performance.now();
     if (V.phase !== 'play') return;
     if (now - V.t0 > ROUND_MAX_SEC * 1000) { vsEnd('timeup'); return; }
-    if (now - V.lastSend < 50) return; V.lastSend = now;
+    if (now - V.lastSend < SEND_MS) return; V.lastSend = now;
     try {
       var d = [], i;
-      for (i = 0; i < defenders.length; i++) { var x = defenders[i]; d.push([x.x | 0, x.y | 0, x.r | 0, (x.leg * 10) | 0, x.downed ? 1 : 0, x.num, x.kb | 0]); }
+      for (i = 0; i < defenders.length; i++) { var x = defenders[i]; d.push([x.vid | 0, x.x | 0, x.y | 0, x.r | 0, (x.leg * 10) | 0, x.downed ? 1 : 0, x.num]); }
       var b = []; for (i = 0; i < blockers.length; i++) { var y = blockers[i]; b.push([y.x | 0, y.y | 0, y.r | 0, (y.leg * 10) | 0, y.num]); }
       send({
         k: 'st',
@@ -124,16 +130,35 @@
     } catch (e) {}
   }
   /* ===== ディフェンス：受信状態をゲームのグローバルへ流し込む ===== */
-  function defApply() {
-    var L = V.latest; if (!L) return;
+  // 受信時だけ「目標値」を更新（毎フレームの作り直しをやめて軽量化）
+  function defIngest(L) {
     try {
-      player = { x: L.p[0], y: L.p[1], r: 15, vx: 0, leg: L.p[2] / 10, cutT: 99, cutDur: 7, cutFrom: 0, cutTarget: 0, lock: 0, jump: L.p[3], jumpMax: L.p[4] || 46, shoulderT: L.p[5], num: L.p[6] || '22' };
-      var ds = [], i;
-      for (i = 0; i < L.d.length; i++) { var a = L.d[i]; ds.push({ x: a[0], y: a[1], r: a[2], leg: a[3] / 10, downed: a[4] === 1, num: a[5], kb: a[6], vx: 0, speedMul: 1, surgeAmp: 0, homing: false, tackler: false, lungeT: 0, lungeCool: 99, t: 0, kbVx: 0, kbVy: 0 }); }
-      defenders = ds;
-      var bs = []; for (i = 0; i < (L.b || []).length; i++) { var c = L.b[i]; bs.push({ x: c[0], y: c[1], r: c[2], leg: c[3] / 10, num: c[4], blocks: 0, life: 900, off: 0 }); }
-      blockers = bs;
-      score = L.s; speed = L.sp; fieldY = L.fy; hasBall = L.hb === 1; qb = null;
+      if (!V.pl) V.pl = { x: L.p[0], y: L.p[1], tx: L.p[0], ty: L.p[1], r: 15, vx: 0, leg: 0, cutT: 99, cutDur: 7, cutFrom: 0, cutTarget: 0, lock: 0, jump: 0, jumpMax: 46, shoulderT: 0, num: '22' };
+      var p = V.pl; p.tx = L.p[0]; p.ty = L.p[1]; p.leg = L.p[2] / 10; p.jump = L.p[3]; p.jumpMax = L.p[4] || 46; p.shoulderT = L.p[5]; p.num = L.p[6] || '22';
+      var seen = {}, i, a, id, o;
+      for (i = 0; i < L.d.length; i++) {
+        a = L.d[i]; id = a[0]; seen[id] = 1; o = V.dmap[id];
+        if (!o) o = V.dmap[id] = { x: a[1], y: a[2], tx: a[1], ty: a[2], r: a[3], leg: 0, downed: false, num: a[6], kb: 0, vx: 0, speedMul: 1, surgeAmp: 0, homing: false, tackler: false, lungeT: 0, lungeCool: 99, t: 0, kbVx: 0, kbVy: 0 };
+        o.tx = a[1]; o.ty = a[2]; o.r = a[3]; o.leg = a[4] / 10; o.downed = a[5] === 1; o.num = a[6];
+      }
+      for (id in V.dmap) { if (!seen[id]) delete V.dmap[id]; }
+      V.barr.length = 0;
+      for (i = 0; i < (L.b || []).length; i++) { var c = L.b[i]; V.barr.push({ x: c[0], y: c[1], r: c[2], leg: c[3] / 10, num: c[4], blocks: 0, life: 900, off: 0 }); }
+      V.sc = L.s; V.sp = L.sp; V.fy = L.fy; V.hb = L.hb;
+      if (!V.fyc) V.fyc = L.fy;
+    } catch (e) {}
+  }
+  // 毎フレームは軽い補間だけ（なめらかに見せる）
+  function defApply() {
+    if (!V.pl) return;
+    try {
+      var k = 0.35, p = V.pl, id, o;
+      p.x += (p.tx - p.x) * k; p.y += (p.ty - p.y) * k;
+      V.darr.length = 0;
+      for (id in V.dmap) { o = V.dmap[id]; o.x += (o.tx - o.x) * k; o.y += (o.ty - o.y) * k; V.darr.push(o); }
+      V.fyc += (V.fy - V.fyc) * k;
+      player = p; defenders = V.darr; blockers = V.barr;
+      score = V.sc; speed = V.sp; fieldY = V.fyc; hasBall = V.hb === 1; qb = null;
     } catch (e) {}
   }
   function defRender() {
@@ -169,6 +194,7 @@
   /* ===== 守備の出現（1PのAIをそのまま付与） ===== */
   function netSpawn(x, y, ti) {
     try {
+      if (defenders.length >= MAXDEF) return;           // 出しすぎ防止（重さ対策）
       var t = DEFTYPES[ti] || DEFTYPES[0];
       var r = t.rMin + Math.random() * (t.rMax - t.rMin);
       var lv = curLevel || { homing: .5, tackler: .35, lunge: .012 };
@@ -178,7 +204,7 @@
       var speedMul = t.spd * (0.9 + Math.random() * 1.05);
       var surgeAmp = (Math.random() < 0.5) ? 1.3 + Math.random() * 1.9 : 0;
       var num = '99'; try { num = '' + rollDefNum(Math.floor(score)); } catch (e) {}
-      defenders.push({ x: x, y: y, r: r, vx: vx, speedMul: speedMul, surgeAmp: surgeAmp, homing: homing, tackler: tackler, lungeT: 0, lungeCool: 50 + Math.random() * 90, t: Math.random() * 6, leg: Math.random() * 6, downed: false, kb: 0, kbVx: 0, kbVy: 0, num: num });
+      defenders.push({ vid: ++_vid, x: x, y: y, r: r, vx: vx, speedMul: speedMul, surgeAmp: surgeAmp, homing: homing, tackler: tackler, lungeT: 0, lungeCool: 50 + Math.random() * 90, t: Math.random() * 6, leg: Math.random() * 6, downed: false, kb: 0, kbVx: 0, kbVy: 0, num: num });
       try { burst(x, y, C.def, 8, 3); } catch (e) {}
     } catch (e) {}
   }
@@ -190,7 +216,9 @@
     var p = ptXY(e);
     if (p.y > H * 0.5) { flash('自陣（上半分）にだけ出せます'); return; }
     var ti = V.selType, t = DEFTYPES[ti], now = performance.now();
+    if (now - V.lastSpawn < SPAWN_MIN) return;           // 連打の下限間隔
     if (t.cd > 0 && now < V.cdUntil[ti]) return;
+    V.lastSpawn = now;
     if (t.cd > 0) V.cdUntil[ti] = now + t.cd;
     send({ k: 'spawn', x: Math.round(p.x), y: Math.round(p.y), t: ti });
     try { sHelmet(); } catch (e2) {}
@@ -253,7 +281,7 @@
     if (p.k === 'round') { enterRound(p.n); return; }
     if (p.k === 'cos') { V.rbCos = p.c; return; }
     if (p.k === 'spawn') { if (V.active && V.amOffense && V.phase === 'play') netSpawn(p.x, p.y, p.t); return; }
-    if (p.k === 'st') { if (V.active && !V.amOffense) V.latest = p; return; }
+    if (p.k === 'st') { if (V.active && !V.amOffense) { V.latest = p; defIngest(p); } return; }
     if (p.k === 'end') { if (V.active && !V.amOffense) { V.phase = 'over'; V.finalYard = p.yd; removeControls(); } return; }
     if (p.k === 'rend') { V.result[p.n] = { yard: p.yd, status: p.s }; if (role === 'host') setTimeout(hostAdvance, 2800); return; }
     if (p.k === 'result') { showResult(p.h, p.g, null); return; }
