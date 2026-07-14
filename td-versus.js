@@ -85,6 +85,7 @@
 
   /* ===== ラウンド開始 ===== */
   function enterRound(n) {
+    if (V.active && V.round === n) return;     // 二重開始を防ぐ
     patchEngine();
     V.active = true; V.round = n; V.phase = 'play';
     V.amOffense = roundOffenseIsHost(n) ? (role === 'host') : (role === 'guest');
@@ -123,7 +124,7 @@
       for (i = 0; i < defenders.length; i++) { var x = defenders[i]; d.push([x.vid | 0, x.x | 0, x.y | 0, x.r | 0, (x.leg * 10) | 0, x.downed ? 1 : 0, x.num]); }
       var b = []; for (i = 0; i < blockers.length; i++) { var y = blockers[i]; b.push([y.x | 0, y.y | 0, y.r | 0, (y.leg * 10) | 0, y.num]); }
       send({
-        k: 'st',
+        k: 'st', n: V.round,
         p: [player.x | 0, player.y | 0, (player.leg * 10) | 0, player.jump | 0, player.jumpMax | 0, player.shoulderT | 0, player.num],
         d: d, b: b, s: Math.floor(score), sp: Math.round(speed * 100) / 100, fy: fieldY | 0, hb: hasBall ? 1 : 0
       });
@@ -281,7 +282,12 @@
     if (p.k === 'round') { enterRound(p.n); return; }
     if (p.k === 'cos') { V.rbCos = p.c; return; }
     if (p.k === 'spawn') { if (V.active && V.amOffense && V.phase === 'play') netSpawn(p.x, p.y, p.t); return; }
-    if (p.k === 'st') { if (V.active && !V.amOffense) { V.latest = p; defIngest(p); } return; }
+    if (p.k === 'st') {
+      // 「開始」の合図を取りこぼしても、状態が届いたら自動で試合に参加する
+      if (!V.active && p.n) enterRound(p.n);
+      if (V.active && !V.amOffense) { V.latest = p; defIngest(p); }
+      return;
+    }
     if (p.k === 'end') { if (V.active && !V.amOffense) { V.phase = 'over'; V.finalYard = p.yd; removeControls(); } return; }
     if (p.k === 'rend') { V.result[p.n] = { yard: p.yd, status: p.s }; if (role === 'host') setTimeout(hostAdvance, 2800); return; }
     if (p.k === 'result') { showResult(p.h, p.g, null); return; }
