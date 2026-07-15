@@ -120,13 +120,17 @@
     if (now - V.t0 > ROUND_MAX_SEC * 1000) { vsEnd('timeup'); return; }
     if (now - V.lastSend < SEND_MS) return; V.lastSend = now;
     try {
+      // 端末ごとに画面サイズ(W・H)が違うため、座標は割合(0〜10000)に正規化して送る。
+      var iw = W || 1, ih = H || 1;
+      var NX = function (v) { return Math.round(v / iw * 1e4); };  // 横・大きさ（幅基準）
+      var NY = function (v) { return Math.round(v / ih * 1e4); };  // 縦（高さ基準）
       var d = [], i;
-      for (i = 0; i < defenders.length; i++) { var x = defenders[i]; d.push([x.vid | 0, x.x | 0, x.y | 0, x.r | 0, (x.leg * 10) | 0, x.downed ? 1 : 0, x.num]); }
-      var b = []; for (i = 0; i < blockers.length; i++) { var y = blockers[i]; b.push([y.x | 0, y.y | 0, y.r | 0, (y.leg * 10) | 0, y.num]); }
+      for (i = 0; i < defenders.length; i++) { var x = defenders[i]; d.push([x.vid | 0, NX(x.x), NY(x.y), NX(x.r), (x.leg * 10) | 0, x.downed ? 1 : 0, x.num]); }
+      var b = []; for (i = 0; i < blockers.length; i++) { var y = blockers[i]; b.push([NX(y.x), NY(y.y), NX(y.r), (y.leg * 10) | 0, y.num]); }
       send({
         k: 'st', n: V.round,
-        p: [player.x | 0, player.y | 0, (player.leg * 10) | 0, player.jump | 0, player.jumpMax | 0, player.shoulderT | 0, player.num],
-        d: d, b: b, s: Math.floor(score), sp: Math.round(speed * 100) / 100, fy: fieldY | 0, hb: hasBall ? 1 : 0
+        p: [NX(player.x), NY(player.y), (player.leg * 10) | 0, player.jump | 0, player.jumpMax | 0, player.shoulderT | 0, player.num, NX(player.r)],
+        d: d, b: b, s: Math.floor(score), sp: Math.round(speed * 100) / 100, fy: NY(fieldY), hb: hasBall ? 1 : 0
       });
     } catch (e) {}
   }
@@ -134,19 +138,24 @@
   // 受信時だけ「目標値」を更新（毎フレームの作り直しをやめて軽量化）
   function defIngest(L) {
     try {
-      if (!V.pl) V.pl = { x: L.p[0], y: L.p[1], tx: L.p[0], ty: L.p[1], r: 15, vx: 0, leg: 0, cutT: 99, cutDur: 7, cutFrom: 0, cutTarget: 0, lock: 0, jump: 0, jumpMax: 46, shoulderT: 0, num: '22' };
-      var p = V.pl; p.tx = L.p[0]; p.ty = L.p[1]; p.leg = L.p[2] / 10; p.jump = L.p[3]; p.jumpMax = L.p[4] || 46; p.shoulderT = L.p[5]; p.num = L.p[6] || '22';
-      var seen = {}, i, a, id, o;
+      // 正規化(0〜10000)で受け取り、自分の画面サイズ(W・H)に合わせて戻す。
+      var iw = W || 1, ih = H || 1;
+      var X = function (v) { return v / 1e4 * iw; };
+      var Y = function (v) { return v / 1e4 * ih; };
+      var prX = X(L.p[0]), prY = Y(L.p[1]), prR = (L.p[7] != null) ? X(L.p[7]) : 15;
+      if (!V.pl) V.pl = { x: prX, y: prY, tx: prX, ty: prY, r: prR, vx: 0, leg: 0, cutT: 99, cutDur: 7, cutFrom: 0, cutTarget: 0, lock: 0, jump: 0, jumpMax: 46, shoulderT: 0, num: '22' };
+      var p = V.pl; p.tx = prX; p.ty = prY; p.r = prR; p.leg = L.p[2] / 10; p.jump = L.p[3]; p.jumpMax = L.p[4] || 46; p.shoulderT = L.p[5]; p.num = L.p[6] || '22';
+      var seen = {}, i, a, id, o, ax, ay, ar;
       for (i = 0; i < L.d.length; i++) {
-        a = L.d[i]; id = a[0]; seen[id] = 1; o = V.dmap[id];
-        if (!o) o = V.dmap[id] = { x: a[1], y: a[2], tx: a[1], ty: a[2], r: a[3], leg: 0, downed: false, num: a[6], kb: 0, vx: 0, speedMul: 1, surgeAmp: 0, homing: false, tackler: false, lungeT: 0, lungeCool: 99, t: 0, kbVx: 0, kbVy: 0 };
-        o.tx = a[1]; o.ty = a[2]; o.r = a[3]; o.leg = a[4] / 10; o.downed = a[5] === 1; o.num = a[6];
+        a = L.d[i]; id = a[0]; seen[id] = 1; ax = X(a[1]); ay = Y(a[2]); ar = X(a[3]); o = V.dmap[id];
+        if (!o) o = V.dmap[id] = { x: ax, y: ay, tx: ax, ty: ay, r: ar, leg: 0, downed: false, num: a[6], kb: 0, vx: 0, speedMul: 1, surgeAmp: 0, homing: false, tackler: false, lungeT: 0, lungeCool: 99, t: 0, kbVx: 0, kbVy: 0 };
+        o.tx = ax; o.ty = ay; o.r = ar; o.leg = a[4] / 10; o.downed = a[5] === 1; o.num = a[6];
       }
       for (id in V.dmap) { if (!seen[id]) delete V.dmap[id]; }
       V.barr.length = 0;
-      for (i = 0; i < (L.b || []).length; i++) { var c = L.b[i]; V.barr.push({ x: c[0], y: c[1], r: c[2], leg: c[3] / 10, num: c[4], blocks: 0, life: 900, off: 0 }); }
-      V.sc = L.s; V.sp = L.sp; V.fy = L.fy; V.hb = L.hb;
-      if (!V.fyc) V.fyc = L.fy;
+      for (i = 0; i < (L.b || []).length; i++) { var c = L.b[i]; V.barr.push({ x: X(c[0]), y: Y(c[1]), r: X(c[2]), leg: c[3] / 10, num: c[4], blocks: 0, life: 900, off: 0 }); }
+      V.sc = L.s; V.sp = L.sp; V.fy = Y(L.fy); V.hb = L.hb;
+      if (!V.fyc) V.fyc = V.fy;
     } catch (e) {}
   }
   // 毎フレームは軽い補間だけ（なめらかに見せる）
@@ -193,9 +202,10 @@
   }
 
   /* ===== 守備の出現（1PのAIをそのまま付与） ===== */
-  function netSpawn(x, y, ti) {
+  function netSpawn(nx, ny, ti) {
     try {
       if (defenders.length >= MAXDEF) return;           // 出しすぎ防止（重さ対策）
+      var x = nx / 1e4 * (W || 1), y = ny / 1e4 * (H || 1);   // 正規化 → 自分（オフェンス）の座標へ
       var t = DEFTYPES[ti] || DEFTYPES[0];
       var r = t.rMin + Math.random() * (t.rMax - t.rMin);
       var lv = curLevel || { homing: .5, tackler: .35, lunge: .012 };
@@ -221,7 +231,7 @@
     if (t.cd > 0 && now < V.cdUntil[ti]) return;
     V.lastSpawn = now;
     if (t.cd > 0) V.cdUntil[ti] = now + t.cd;
-    send({ k: 'spawn', x: Math.round(p.x), y: Math.round(p.y), t: ti });
+    send({ k: 'spawn', x: Math.round(p.x / (W || 1) * 1e4), y: Math.round(p.y / (H || 1) * 1e4), t: ti });
     try { sHelmet(); } catch (e2) {}
     updateTypeButtons();
   }
