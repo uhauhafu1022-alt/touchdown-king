@@ -1,0 +1,19 @@
+name: Keep Supabase Awake
+# Supabase無料プランは7日間アクセスが無いと自動停止する。
+# 2日に1度、軽くDBへアクセスして起こし続ける（停止防止）。
+on:
+  schedule:
+    - cron: '17 3 */2 * *'   # 2日ごと 03:17 UTC
+  workflow_dispatch:          # 手動実行も可能
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase REST (supporters)
+        run: |
+          code=$(curl -sS -o /dev/null -w "%{http_code}" \
+            "https://wskusmszhuqecvqtbmka.supabase.co/rest/v1/supporters?select=*&limit=1" \
+            -H "apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indza3VzbXN6aHVxZWN2cXRibWthIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwMjUzOTcsImV4cCI6MjA5NjYwMTM5N30.mrxVlEusJ46_gUBi7o5_xMGgHI7H88WvW5tMdbByFCk" \
+            -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indza3VzbXN6aHVxZWN2cXRibWthIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwMjUzOTcsImV4cCI6MjA5NjYwMTM5N30.mrxVlEusJ46_gUBi7o5_xMGgHI7H88WvW5tMdbByFCk")
+          echo "Supabase responded: HTTP $code"
+          if [ "$code" = "000" ]; then echo "no response"; exit 1; fi
